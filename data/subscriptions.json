@@ -1,0 +1,13 @@
+[
+  {
+    "id": "x3xhbnsn0",
+    "email": "romjah2004@gmail.com",
+    "createdAt": "2025-06-13T01:56:37.879Z",
+    "verified": true,
+    "types": [
+      "incident",
+      "maintenance",
+      "resolution"
+    ]
+  }
+]

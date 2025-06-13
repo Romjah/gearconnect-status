@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Bell, RefreshCw, Calendar, ExternalLink } from 'lucide-react';
+import { RefreshCw, Calendar, ExternalLink, AlertTriangle } from 'lucide-react';
 import StatusOverview from '@/components/status-overview';
 import IncidentsList from '@/components/incidents-list';
-import UptimeChart from '@/components/uptime-chart';
+import DetailedErrors from '@/components/detailed-errors';
 import NotificationSubscription from '@/components/notification-subscription';
 import { StatusPageData } from '@/lib/types';
 
@@ -46,10 +46,10 @@ export default function StatusPage() {
   useEffect(() => {
     fetchStatusData();
 
-    let interval: NodeJS.Timeout;
+    let interval: ReturnType<typeof setInterval>;
     if (autoRefresh) {
-      // Rafraîchir toutes les 30 secondes
-      interval = setInterval(fetchStatusData, 30000);
+      // Rafraîchir toutes les 15 secondes pour avoir des données récentes
+      interval = setInterval(fetchStatusData, 15000);
     }
 
     return () => {
@@ -67,7 +67,7 @@ export default function StatusPage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center space-y-4">
           <RefreshCw className="h-8 w-8 animate-spin mx-auto text-gray-600" />
-          <p className="text-gray-600">Loading system status...</p>
+          <p className="text-gray-600">Loading GearConnect status...</p>
         </div>
       </div>
     );
@@ -78,7 +78,7 @@ export default function StatusPage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center space-y-4 max-w-md mx-auto px-4">
           <div className="text-red-600">
-            <Calendar className="h-8 w-8 mx-auto" />
+            <AlertTriangle className="h-8 w-8 mx-auto" />
           </div>
           <h1 className="text-2xl font-bold text-gray-900">Unable to Load Status</h1>
           <p className="text-gray-600">{error}</p>
@@ -110,6 +110,11 @@ export default function StatusPage() {
               <div className="text-sm text-gray-500">
                 Updated {lastRefresh.toLocaleTimeString()}
               </div>
+              {statusData.status.totalActiveIssues > 0 && (
+                <div className="bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs font-medium">
+                  {statusData.status.totalActiveIssues} active issue{statusData.status.totalActiveIssues !== 1 ? 's' : ''}
+                </div>
+              )}
             </div>
             
             <div className="flex items-center space-x-4">
@@ -144,18 +149,37 @@ export default function StatusPage() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="space-y-12">
+        <div className="space-y-8">
           {/* Status Overview */}
-          <StatusOverview
-            status={statusData.status}
-            metrics={statusData.metrics}
-          />
+          <StatusOverview status={statusData.status} />
 
-          {/* Uptime Chart */}
-          <UptimeChart history={statusData.history} />
+          {/* Debugging Help Banner */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+            <div className="flex items-start space-x-3">
+              <div className="flex-shrink-0">
+                <ExternalLink className="h-5 w-5 text-blue-600 mt-0.5" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-medium text-blue-900 mb-2">
+                  Troubleshooting GearConnect Issues
+                </h3>
+                <div className="text-sm text-blue-800 space-y-2">
+                  <p>
+                    <strong>Check below for:</strong> Real-time incidents affecting your device, detailed error information, and technical details from our error tracking system.
+                  </p>
+                  <p>
+                    <strong>Data source:</strong> All information comes directly from Sentry error monitoring - no estimated values.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
 
           {/* Recent Incidents */}
           <IncidentsList incidents={statusData.incidents} />
+
+          {/* Detailed Errors for Debugging */}
+          <DetailedErrors errors={statusData.detailedErrors} />
         </div>
       </main>
 
@@ -166,18 +190,14 @@ export default function StatusPage() {
             <div className="text-sm text-gray-600">
               <p>© 2024 GearConnect. All rights reserved.</p>
               <p className="mt-1">
-                Last system check: {new Date(statusData.lastUpdated).toLocaleString()}
+                Real-time data from Sentry • Last update: {new Date(statusData.lastUpdated).toLocaleString()}
               </p>
             </div>
             
             <div className="flex items-center space-x-6">
-              <a
-                href="/history"
-                className="text-sm text-gray-600 hover:text-gray-900 flex items-center space-x-1"
-              >
-                <Calendar className="h-4 w-4" />
-                <span>Status History</span>
-              </a>
+              <span className="text-sm text-gray-600">
+                Powered by real error tracking
+              </span>
               
               <a
                 href="https://sentry.io"
@@ -186,7 +206,7 @@ export default function StatusPage() {
                 className="text-sm text-gray-600 hover:text-gray-900 flex items-center space-x-1"
               >
                 <ExternalLink className="h-4 w-4" />
-                <span>Powered by Sentry</span>
+                <span>Sentry</span>
               </a>
             </div>
           </div>

@@ -28,10 +28,12 @@ export function formatRelativeTime(date: string | Date): string {
 }
 
 export function formatResponseTime(ms: number): string {
+  if (!ms || ms === 0) return 'N/A';
   if (ms < 1000) return `${Math.round(ms)}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
 export function formatUptime(percentage: number): string {
+  if (percentage === 0) return 'N/A';
   return `${percentage.toFixed(2)}%`;
 } 

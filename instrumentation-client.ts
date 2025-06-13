@@ -33,4 +33,8 @@ Sentry.init({
       blockAllMedia: false,
     }),
   ],
-}); 
+});
+
+// Export required hooks for Next.js 15
+export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;
+export const onRequestError = Sentry.captureRequestError; 

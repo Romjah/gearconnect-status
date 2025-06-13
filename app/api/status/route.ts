@@ -1,56 +1,49 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sentryClient } from '@/lib/sentry-client';
-import { mobileClient } from '@/lib/mobile-client';
 import { StatusPageData } from '@/lib/types';
 
 export async function GET(request: NextRequest) {
   try {
-    // Récupérer les données en parallèle depuis toutes les sources
-    const [mobileStatus, sentryIncidents, sentryMetrics, uptimeHistory, responseTimeHistory] = await Promise.allSettled([
-      mobileClient.getSystemStatus(),
+    // Récupérer les données concrètes depuis Sentry pour le debugging
+    const [servicesStatus, incidents, detailedErrors] = await Promise.allSettled([
+      sentryClient.getServicesStatus(),
       sentryClient.getIncidents(),
-      sentryClient.getMetrics(),
-      mobileClient.getUptimeHistory(30),
-      mobileClient.getResponseTimeHistory(24),
+      sentryClient.getDetailedErrors(),
     ]);
 
     // Résoudre les résultats avec des fallbacks
-    const status = mobileStatus.status === 'fulfilled' 
-      ? mobileStatus.value 
+    const status = servicesStatus.status === 'fulfilled' 
+      ? servicesStatus.value 
       : {
           overall: { status: 'operational' as const, lastChecked: new Date().toISOString() },
-          services: {},
+          services: {
+            mobile: { status: 'operational', lastChecked: new Date().toISOString(), issueCount: 0, lastIssue: null },
+            api: { status: 'operational', lastChecked: new Date().toISOString(), issueCount: 0, lastIssue: null },
+            auth: { status: 'operational', lastChecked: new Date().toISOString(), issueCount: 0, lastIssue: null },
+            storage: { status: 'operational', lastChecked: new Date().toISOString(), issueCount: 0, lastIssue: null },
+          },
           lastUpdated: new Date().toISOString(),
+          totalActiveIssues: 0,
         };
 
-    const incidents = sentryIncidents.status === 'fulfilled' ? sentryIncidents.value : [];
-    const metrics = sentryMetrics.status === 'fulfilled' ? sentryMetrics.value : {
-      uptime: { percentage: 99.9, lastUpdated: new Date().toISOString() },
-      responseTime: { average: 200, trend: 'stable' as const, lastUpdated: new Date().toISOString() },
-      errorRate: { percentage: 0.1, trend: 'stable' as const, lastUpdated: new Date().toISOString() },
-    };
+    const incidentsData = incidents.status === 'fulfilled' ? incidents.value : [];
+    const errorsData = detailedErrors.status === 'fulfilled' ? detailedErrors.value : [];
 
-    const history = {
-      uptime: uptimeHistory.status === 'fulfilled' ? uptimeHistory.value : [],
-      responseTime: responseTimeHistory.status === 'fulfilled' ? responseTimeHistory.value : [],
-    };
-
-    // Construire la réponse complète
+    // Construire la réponse simplifiée et utile
     const statusPageData: StatusPageData = {
       status,
-      metrics,
-      incidents,
-      history,
+      incidents: incidentsData,
+      detailedErrors: errorsData,
       lastUpdated: new Date().toISOString(),
     };
 
     // Headers pour le cache et la performance
     const response = NextResponse.json(statusPageData);
     
-    // Cache pendant 30 secondes
-    response.headers.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+    // Cache pendant 15 secondes (plus court pour avoir des données récentes)
+    response.headers.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=30');
     
-    // Headers CORS pour permettre l'accès depuis d'autres domaines
+    // Headers CORS
     response.headers.set('Access-Control-Allow-Origin', '*');
     response.headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
     response.headers.set('Access-Control-Allow-Headers', 'Content-Type');
@@ -60,7 +53,7 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error('Error in status API:', error);
     
-    // Retourner des données de fallback en cas d'erreur
+    // Retourner des données de fallback minimales
     const fallbackData: StatusPageData = {
       status: {
         overall: { 
@@ -68,62 +61,43 @@ export async function GET(request: NextRequest) {
           lastChecked: new Date().toISOString() 
         },
         services: {
+          mobile: { 
+            status: 'operational', 
+            lastChecked: new Date().toISOString(),
+            issueCount: 0,
+            lastIssue: null
+          },
           api: { 
             status: 'operational', 
-            responseTime: 200, 
-            lastChecked: new Date().toISOString() 
-          },
-          database: { 
-            status: 'operational', 
-            responseTime: 150, 
-            lastChecked: new Date().toISOString() 
-          },
-          storage: { 
-            status: 'operational', 
-            responseTime: 100, 
-            lastChecked: new Date().toISOString() 
+            lastChecked: new Date().toISOString(),
+            issueCount: 0,
+            lastIssue: null
           },
           auth: { 
             status: 'operational', 
-            responseTime: 80, 
-            lastChecked: new Date().toISOString() 
+            lastChecked: new Date().toISOString(),
+            issueCount: 0,
+            lastIssue: null
           },
-          mobile: { 
+          storage: { 
             status: 'operational', 
-            responseTime: 50, 
-            lastChecked: new Date().toISOString() 
+            lastChecked: new Date().toISOString(),
+            issueCount: 0,
+            lastIssue: null
           },
         },
         lastUpdated: new Date().toISOString(),
-      },
-      metrics: {
-        uptime: { 
-          percentage: 99.9, 
-          lastUpdated: new Date().toISOString() 
-        },
-        responseTime: { 
-          average: 200, 
-          trend: 'stable', 
-          lastUpdated: new Date().toISOString() 
-        },
-        errorRate: { 
-          percentage: 0.1, 
-          trend: 'stable', 
-          lastUpdated: new Date().toISOString() 
-        },
+        totalActiveIssues: 0,
       },
       incidents: [],
-      history: {
-        uptime: [],
-        responseTime: [],
-      },
+      detailedErrors: [],
       lastUpdated: new Date().toISOString(),
     };
 
     return NextResponse.json(fallbackData, { 
-      status: 200, // Retourner 200 même en cas d'erreur pour éviter de casser le site
+      status: 200,
       headers: {
-        'Cache-Control': 'public, max-age=10, stale-while-revalidate=30',
+        'Cache-Control': 'public, max-age=5, stale-while-revalidate=15',
         'Access-Control-Allow-Origin': '*',
       }
     });

@@ -1,174 +1,410 @@
-import { Incident, StatusMetrics, SentryEvent, SentryMetrics } from './types';
-
-// Configuration Sentry pour récupérer les données
-const SENTRY_CONFIG = {
-  org: process.env.SENTRY_ORG || 'coding-factory-classrooms',
-  project: process.env.SENTRY_PROJECT || 'react-native',
-  authToken: process.env.SENTRY_AUTH_TOKEN,
-  apiUrl: 'https://sentry.io/api/0',
-};
+import { Incident, SentryEvent } from './types';
 
 class SentryStatusClient {
-  private authToken: string;
-  private baseUrl: string;
+  private debug: boolean = false;
 
   constructor() {
-    this.authToken = SENTRY_CONFIG.authToken || '';
-    this.baseUrl = SENTRY_CONFIG.apiUrl;
+    // Configuration dynamique - lue à chaque utilisation
+  }
+
+  // Récupérer la configuration Sentry dynamiquement
+  private getConfig() {
+    return {
+      org: process.env.SENTRY_ORG || 'coding-factory-classrooms',
+      project: process.env.SENTRY_PROJECT || 'react-native',
+      authToken: process.env.SENTRY_AUTH_TOKEN,
+      apiUrl: 'https://sentry.io/api/0',
+      debug: process.env.SENTRY_DEBUG === 'true',
+    };
+  }
+
+  // Vérifier si on doit utiliser les données mock
+  private shouldUseMockData(): boolean {
+    const config = this.getConfig();
+    const useMock = !config.authToken;
+    
+    if (useMock && config.debug) {
+      console.info('🔧 Sentry client: Using mock data (no auth token configured)');
+      if (process.env.NODE_ENV === 'development') {
+        console.info('💡 To use real Sentry data, add SENTRY_AUTH_TOKEN to your .env.local file');
+      }
+    } else if (!useMock && config.debug) {
+      console.info('🔗 Sentry client: Connected to real Sentry API');
+      console.info(`📊 Sentry config: org=${config.org}, project=${config.project}`);
+    }
+    
+    return useMock;
   }
 
   private async fetchSentryAPI(endpoint: string) {
-    if (!this.authToken) {
-      console.warn('Sentry auth token not configured, using mock data');
+    const config = this.getConfig();
+    
+    if (this.shouldUseMockData()) {
+      if (config.debug) {
+        console.info(`🔄 Mock data requested for: ${endpoint}`);
+      }
       return this.getMockData(endpoint);
     }
 
+    if (config.debug) {
+      console.info(`🌐 Fetching from Sentry API: ${endpoint}`);
+    }
+
     try {
-      const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      const fullUrl = `${config.apiUrl}${endpoint}`;
+      if (config.debug) {
+        console.info(`🔗 Full URL: ${fullUrl}`);
+      }
+
+      const response = await fetch(fullUrl, {
         headers: {
-          Authorization: `Bearer ${this.authToken}`,
+          Authorization: `Bearer ${config.authToken}`,
           'Content-Type': 'application/json',
         },
       });
 
       if (!response.ok) {
-        throw new Error(`Sentry API error: ${response.status}`);
+        const errorText = await response.text();
+        console.error(`❌ Sentry API Error ${response.status}: ${response.statusText}`);
+        console.error(`📄 Response body: ${errorText}`);
+        
+        if (response.status === 404) {
+          console.error(`🎯 Endpoint not found. Check org (${config.org}) and project (${config.project}) names`);
+        } else if (response.status === 401) {
+          console.error(`🔐 Authentication failed. Check your SENTRY_AUTH_TOKEN`);
+        } else if (response.status === 403) {
+          console.error(`🚫 Access forbidden. Check token permissions (need Organization:read and Project:read)`);
+        }
+        
+        throw new Error(`Sentry API error: ${response.status} ${response.statusText}`);
       }
 
-      return await response.json();
+      const data = await response.json();
+      
+      if (config.debug) {
+        console.info(`✅ Sentry API success: ${Array.isArray(data) ? data.length : Object.keys(data || {}).length} items received`);
+      }
+
+      return data;
     } catch (error) {
-      console.error('Error fetching from Sentry API:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.warn(`⚠️ Sentry API unavailable (${errorMessage}), falling back to mock data`);
+      
+      if (config.debug) {
+        console.error('Sentry API Error Details:', error);
+      }
+      
       return this.getMockData(endpoint);
     }
   }
 
-  // Récupérer les incidents depuis Sentry
+  // Récupérer les incidents actuels avec détails pour debugging
   async getIncidents(): Promise<Incident[]> {
+    const config = this.getConfig();
+    
     try {
-      // Récupérer les issues Sentry avec des tags spéciaux pour les incidents
+      if (config.debug) {
+        console.info('🔍 Fetching real incidents from Sentry...');
+      }
+
+      // Récupérer les issues Sentry récentes (résolues et non résolues)
       const issues = await this.fetchSentryAPI(
-        `/projects/${SENTRY_CONFIG.org}/${SENTRY_CONFIG.project}/issues/?query=tag:incident_type:service_outage&statsPeriod=30d`
+        `/projects/${config.org}/${config.project}/issues/?statsPeriod=7d&limit=50&sort=date`
       );
 
-      return this.transformSentryIssuesToIncidents(issues);
+      const incidents = this.transformSentryIssuesToIncidents(issues);
+      
+      if (config.debug) {
+        console.info(`📋 Found ${incidents.length} real incidents from last 7 days`);
+      }
+
+      return incidents;
     } catch (error) {
       console.error('Error fetching incidents from Sentry:', error);
       return this.getMockIncidents();
     }
   }
 
-  // Récupérer les métriques de performance depuis Sentry
-  async getMetrics(): Promise<StatusMetrics> {
+  // Calculer le statut réel des services basé uniquement sur les incidents non résolus
+  async getServicesStatus(): Promise<any> {
+    const config = this.getConfig();
+    
     try {
-      // Récupérer les métriques de performance
-      const [errorStats, performanceStats] = await Promise.all([
-        this.fetchSentryAPI(
-          `/projects/${SENTRY_CONFIG.org}/${SENTRY_CONFIG.project}/stats/?stat=received&since=${Date.now() - 24 * 60 * 60 * 1000}&until=${Date.now()}&resolution=1h`
-        ),
-        this.fetchSentryAPI(
-          `/projects/${SENTRY_CONFIG.org}/${SENTRY_CONFIG.project}/events/?query=transaction.duration:>0&statsPeriod=24h`
-        ),
-      ]);
+      if (config.debug) {
+        console.info('🔧 Calculating real services status from current incidents...');
+      }
 
-      return this.transformSentryStatsToMetrics(errorStats, performanceStats);
+      const incidents = await this.getIncidents();
+      const now = new Date().toISOString();
+
+      // Filtrer seulement les incidents non résolus (problèmes actuels)
+      const currentIssues = incidents.filter(i => i.status !== 'resolved');
+
+      // Services de l'application GearConnect
+      const services = {
+        mobile: { 
+          status: 'operational', 
+          lastChecked: now,
+          issueCount: 0,
+          lastIssue: null as string | null
+        },
+        api: { 
+          status: 'operational', 
+          lastChecked: now,
+          issueCount: 0,
+          lastIssue: null as string | null
+        },
+        auth: { 
+          status: 'operational', 
+          lastChecked: now,
+          issueCount: 0,
+          lastIssue: null as string | null
+        },
+        storage: { 
+          status: 'operational', 
+          lastChecked: now,
+          issueCount: 0,
+          lastIssue: null as string | null
+        },
+      };
+
+      // Analyser chaque incident non résolu
+      for (const incident of currentIssues) {
+        const affectedServices = this.getAffectedServicesFromIncident(incident);
+
+        for (const serviceName of affectedServices) {
+          if (services[serviceName as keyof typeof services]) {
+            const service = services[serviceName as keyof typeof services];
+            
+            // Compter les incidents
+            service.issueCount++;
+            service.lastIssue = incident.createdAt;
+            
+            // Mettre à jour le statut selon la sévérité
+            if (incident.severity === 'critical') {
+              service.status = 'down';
+            } else if (incident.severity === 'major' && service.status === 'operational') {
+              service.status = 'degraded';
+            } else if (incident.severity === 'minor' && service.status === 'operational') {
+              service.status = 'degraded';
+            }
+          }
+        }
+      }
+
+      // Calculer le statut global
+      const overall = this.calculateOverallStatus(services);
+
+      if (config.debug) {
+        const affectedServices = Object.keys(services).filter(s => services[s as keyof typeof services].status !== 'operational');
+        console.info(`🎯 Real services status: overall=${overall.status}, affected=${affectedServices.join(', ')}, total issues=${currentIssues.length}`);
+      }
+
+      return {
+        overall,
+        services,
+        lastUpdated: now,
+        totalActiveIssues: currentIssues.length,
+      };
+
     } catch (error) {
-      console.error('Error fetching metrics from Sentry:', error);
-      return this.getMockMetrics();
+      console.error('Error calculating services status from Sentry:', error);
+      return this.getMockServicesStatus();
     }
   }
 
-  // Récupérer les événements récents avec tags de santé système
-  async getHealthEvents(): Promise<SentryEvent[]> {
+  // Récupérer les détails d'erreurs pour debugging
+  async getDetailedErrors(): Promise<any[]> {
+    const config = this.getConfig();
+    
     try {
+      if (config.debug) {
+        console.info('🔍 Fetching detailed error information...');
+      }
+
       const events = await this.fetchSentryAPI(
-        `/projects/${SENTRY_CONFIG.org}/${SENTRY_CONFIG.project}/events/?query=tag:health_status&statsPeriod=1d&limit=50`
+        `/projects/${config.org}/${config.project}/events/?query=&statsPeriod=24h&limit=20`
       );
 
-      return events.map((event: any) => ({
+      if (!Array.isArray(events)) {
+        return [];
+      }
+
+      const detailedErrors = events.map((event: any) => ({
         id: event.id,
-        title: event.title || event.message,
-        level: event.level,
+        title: event.title || event.message || 'Unknown error',
+        level: event.level || 'error',
         timestamp: event.dateCreated,
-        tags: event.tags,
-        contexts: event.contexts || {},
+        user: event.user || null,
+        device: event.contexts?.device || null,
+        os: event.contexts?.os || null,
+        app: event.contexts?.app || null,
+        stackTrace: event.entries?.find((e: any) => e.type === 'exception')?.data || null,
+        breadcrumbs: event.entries?.find((e: any) => e.type === 'breadcrumbs')?.data?.values || [],
+        tags: event.tags || [],
       }));
+
+      if (config.debug) {
+        console.info(`🎯 Found ${detailedErrors.length} detailed errors for debugging`);
+      }
+
+      return detailedErrors;
     } catch (error) {
-      console.error('Error fetching health events from Sentry:', error);
+      console.error('Error fetching detailed errors from Sentry:', error);
       return [];
     }
   }
 
-  // Transformer les issues Sentry en incidents
+  // Déterminer quels services sont affectés par un incident
+  private getAffectedServicesFromIncident(incident: any): string[] {
+    const services = new Set<string>();
+
+    const title = incident.title.toLowerCase();
+    
+    if (title.includes('auth') || title.includes('login')) services.add('Authentication');
+    if (title.includes('api') || title.includes('network') || title.includes('fetch')) services.add('API');
+    if (title.includes('storage') || title.includes('upload') || title.includes('file')) services.add('Storage');
+    if (title.includes('mobile') || title.includes('app') || title.includes('navigation')) services.add('Mobile App');
+    
+    // Analyser les tags
+    if (incident.tags) {
+      for (const tag of incident.tags) {
+        if (tag.key === 'service' || tag.key === 'component') {
+          services.add(tag.value);
+        }
+      }
+    }
+    
+    // Service par défaut si aucun détecté
+    if (services.size === 0) {
+      services.add('Mobile App');
+    }
+    
+    return Array.from(services);
+  }
+
+  // Calculer le statut global du système
+  private calculateOverallStatus(services: any): { status: string; lastChecked: string } {
+    const statuses = Object.values(services).map((service: any) => service.status);
+    const now = new Date().toISOString();
+
+    if (statuses.includes('down')) {
+      return { status: 'down', lastChecked: now };
+    } else if (statuses.includes('degraded')) {
+      return { status: 'degraded', lastChecked: now };
+    } else {
+      return { status: 'operational', lastChecked: now };
+    }
+  }
+
+  // Statut des services mock pour les fallbacks
+  private getMockServicesStatus(): any {
+    const now = new Date().toISOString();
+    
+    return {
+      overall: {
+        status: 'operational',
+        lastChecked: now,
+      },
+      services: {
+        mobile: { status: 'operational', lastChecked: now, issueCount: 0, lastIssue: null },
+        api: { status: 'operational', lastChecked: now, issueCount: 0, lastIssue: null },
+        auth: { status: 'operational', lastChecked: now, issueCount: 0, lastIssue: null },
+        storage: { status: 'operational', lastChecked: now, issueCount: 0, lastIssue: null },
+      },
+      lastUpdated: now,
+      totalActiveIssues: 0,
+    };
+  }
+
+  // Transformer les issues Sentry en incidents avec plus de détails
   private transformSentryIssuesToIncidents(issues: any[]): Incident[] {
-    if (!Array.isArray(issues)) return this.getMockIncidents();
+    const config = this.getConfig();
+    
+    if (!Array.isArray(issues)) {
+      if (config.debug) {
+        console.warn('Issues response is not an array:', typeof issues);
+      }
+      return this.getMockIncidents();
+    }
 
     return issues
-      .filter(issue => issue.tags?.some((tag: any) => tag.key === 'incident_type'))
       .map((issue: any) => {
-        const severityTag = issue.tags?.find((tag: any) => tag.key === 'incident_severity');
-        const affectedServicesTag = issue.tags?.find((tag: any) => tag.key === 'affected_services');
+        const level = issue.level || 'error';
+        const severity = level === 'fatal' ? 'critical' : level === 'error' ? 'major' : 'minor';
         
         return {
           id: issue.id,
           title: issue.title || issue.culprit || 'Unknown incident',
           status: this.mapSentryStatusToIncidentStatus(issue.status),
-          severity: severityTag?.value || 'minor',
-          affectedServices: affectedServicesTag?.value?.split(',') || ['unknown'],
+          severity: severity as 'minor' | 'major' | 'critical',
+          affectedServices: this.extractAffectedServices(issue),
           createdAt: issue.firstSeen,
           resolvedAt: issue.status === 'resolved' ? issue.lastSeen : undefined,
           updates: this.extractIncidentUpdates(issue),
+          // Informations supplémentaires pour debugging
+          count: issue.count || 0,
+          userCount: issue.userCount || 0,
+          permalink: issue.permalink,
+          shortId: issue.shortId,
+          platform: issue.platform,
         };
       })
-      .slice(0, 10); // Limiter à 10 incidents récents
+      .slice(0, 20); // Limiter à 20 incidents récents
   }
 
-  // Transformer les stats Sentry en métriques
-  private transformSentryStatsToMetrics(errorStats: any, performanceStats: any): StatusMetrics {
-    const now = new Date().toISOString();
+  // Extraire les services affectés depuis les tags/contexte
+  private extractAffectedServices(issue: any): string[] {
+    const services = new Set<string>();
     
-    // Calculer le taux d'erreur
-    const totalEvents = errorStats?.reduce((sum: number, stat: any) => sum + (stat[1] || 0), 0) || 0;
-    const errorRate = Math.min(totalEvents / 1000 * 100, 5); // Limiter à 5% max pour la simulation
-
-    // Calculer le temps de réponse moyen
-    const avgResponseTime = performanceStats?.length > 0 
-      ? performanceStats.reduce((sum: number, event: any) => 
-          sum + (event['transaction.duration'] || 200), 0
-        ) / performanceStats.length 
-      : 200;
-
-    // Calculer l'uptime basé sur les erreurs
-    const uptime = Math.max(95, 100 - errorRate);
-
-    return {
-      uptime: {
-        percentage: Math.round(uptime * 100) / 100,
-        lastUpdated: now,
-      },
-      responseTime: {
-        average: Math.round(avgResponseTime),
-        trend: avgResponseTime > 1000 ? 'up' : avgResponseTime < 200 ? 'down' : 'stable',
-        lastUpdated: now,
-      },
-      errorRate: {
-        percentage: Math.round(errorRate * 100) / 100,
-        trend: errorRate > 2 ? 'up' : errorRate < 0.5 ? 'down' : 'stable',
-        lastUpdated: now,
-      },
-    };
+    // Analyser le titre et le culprit
+    const text = `${issue.title || ''} ${issue.culprit || ''}`.toLowerCase();
+    
+    if (text.includes('auth') || text.includes('login')) services.add('Authentication');
+    if (text.includes('api') || text.includes('network') || text.includes('fetch')) services.add('API');
+    if (text.includes('storage') || text.includes('upload') || text.includes('file')) services.add('Storage');
+    if (text.includes('mobile') || text.includes('app') || text.includes('navigation')) services.add('Mobile App');
+    
+    // Analyser les tags
+    if (issue.tags) {
+      for (const tag of issue.tags) {
+        if (tag.key === 'service' || tag.key === 'component') {
+          services.add(tag.value);
+        }
+      }
+    }
+    
+    // Service par défaut si aucun détecté
+    if (services.size === 0) {
+      services.add('Mobile App');
+    }
+    
+    return Array.from(services);
   }
 
   // Extraire les mises à jour d'incident
   private extractIncidentUpdates(issue: any): any[] {
-    // Pour une implémentation complète, on pourrait récupérer l'historique des activités
-    return [
-      {
-        id: `${issue.id}-update-1`,
+    const updates = [];
+    
+    if (issue.firstSeen) {
+      updates.push({
+        id: `${issue.id}-first`,
+        timestamp: issue.firstSeen,
+        status: 'investigating',
+        message: `First occurrence detected ${issue.count > 1 ? `(${issue.count} times total)` : ''}`,
+      });
+    }
+    
+    if (issue.lastSeen && issue.lastSeen !== issue.firstSeen) {
+      updates.push({
+        id: `${issue.id}-last`,
         timestamp: issue.lastSeen,
         status: this.mapSentryStatusToIncidentStatus(issue.status),
-        message: `Incident ${issue.status}. Last seen: ${new Date(issue.lastSeen).toLocaleString()}`,
-      },
-    ];
+        message: `Last occurrence ${issue.userCount > 1 ? `affecting ${issue.userCount} users` : ''}`,
+      });
+    }
+    
+    return updates;
   }
 
   // Mapper le statut Sentry au statut d'incident
@@ -177,16 +413,15 @@ class SentryStatusClient {
       case 'unresolved': return 'investigating';
       case 'ignored': return 'identified';
       case 'resolved': return 'resolved';
-      default: return 'monitoring';
+      case 'resolving': return 'monitoring';
+      default: return 'investigating';
     }
   }
 
-  // Données mock pour le développement et les fallbacks
+  // Données mock simplifiées pour le développement
   private getMockData(endpoint: string): any {
     if (endpoint.includes('issues')) {
       return this.getMockSentryIssues();
-    } else if (endpoint.includes('stats')) {
-      return this.getMockSentryStats();
     } else if (endpoint.includes('events')) {
       return this.getMockSentryEvents();
     }
@@ -196,36 +431,38 @@ class SentryStatusClient {
   private getMockSentryIssues(): any[] {
     return [
       {
-        id: 'sentry-issue-1',
-        title: 'API Response Time Degraded',
-        status: 'resolved',
-        firstSeen: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        id: 'mock-issue-1',
+        title: 'Network timeout in user authentication',
+        status: 'unresolved',
+        level: 'error',
+        firstSeen: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
         lastSeen: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
+        count: 15,
+        userCount: 5,
+        platform: 'react-native',
+        permalink: 'https://sentry.io/mock-issue-1',
+        shortId: 'GEARCONNECT-1',
         tags: [
-          { key: 'incident_type', value: 'service_outage' },
-          { key: 'incident_severity', value: 'minor' },
-          { key: 'affected_services', value: 'api' },
+          { key: 'service', value: 'auth' },
+          { key: 'component', value: 'login' },
         ],
       },
     ];
   }
 
-  private getMockSentryStats(): any[] {
-    return Array.from({ length: 24 }, (_, i) => [
-      Date.now() - (23 - i) * 60 * 60 * 1000,
-      Math.floor(Math.random() * 10),
-    ]);
-  }
-
   private getMockSentryEvents(): any[] {
     return [
       {
-        id: 'event-1',
-        title: 'System health check completed',
-        level: 'info',
-        dateCreated: new Date().toISOString(),
-        tags: [{ key: 'health_status', value: 'healthy' }],
-        contexts: {},
+        id: 'mock-event-1',
+        title: 'Network Error: timeout',
+        level: 'error',
+        dateCreated: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+        user: { email: 'user@example.com' },
+        contexts: {
+          device: { model: 'iPhone 12', os: { name: 'iOS', version: '15.0' } },
+          app: { version: '1.2.0' }
+        },
+        tags: [{ key: 'environment', value: 'production' }],
       },
     ];
   }
@@ -234,42 +471,24 @@ class SentryStatusClient {
     return [
       {
         id: 'mock-incident-1',
-        title: 'API Response Time Increased',
-        status: 'resolved',
-        severity: 'minor',
-        affectedServices: ['api'],
-        createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-        resolvedAt: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
+        title: 'Authentication Service Timeout',
+        status: 'investigating',
+        severity: 'major',
+        affectedServices: ['Authentication', 'Mobile App'],
+        createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
         updates: [
           {
             id: 'update-1',
             timestamp: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
-            status: 'resolved',
-            message: 'API response times have returned to normal. Monitoring continues.',
+            status: 'investigating',
+            message: 'First occurrence detected (15 times total)',
           },
         ],
+        count: 15,
+        userCount: 5,
+        platform: 'react-native',
       },
     ];
-  }
-
-  private getMockMetrics(): StatusMetrics {
-    const now = new Date().toISOString();
-    return {
-      uptime: {
-        percentage: 99.95,
-        lastUpdated: now,
-      },
-      responseTime: {
-        average: 185,
-        trend: 'stable',
-        lastUpdated: now,
-      },
-      errorRate: {
-        percentage: 0.05,
-        trend: 'stable',
-        lastUpdated: now,
-      },
-    };
   }
 }
 

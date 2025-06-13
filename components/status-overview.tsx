@@ -1,39 +1,44 @@
 import React from 'react';
-import { Activity, Clock, AlertTriangle } from 'lucide-react';
-import { SystemStatus, StatusMetrics } from '@/lib/types';
+import { AlertTriangle, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { SystemStatus } from '@/lib/types';
 import StatusIndicator from './ui/status-indicator';
-import { formatResponseTime, formatUptime, formatRelativeTime } from '@/lib/utils';
+import { formatRelativeTime } from '@/lib/utils';
 
 interface StatusOverviewProps {
   status: SystemStatus;
-  metrics: StatusMetrics;
 }
 
-const StatusOverview: React.FC<StatusOverviewProps> = ({ status, metrics }) => {
+const StatusOverview: React.FC<StatusOverviewProps> = ({ status }) => {
   const getOverallMessage = () => {
-    switch (status.overall.status) {
-      case 'operational':
-        return 'All systems are operating normally.';
-      case 'degraded':
-        return 'We are experiencing some performance issues.';
-      case 'down':
-        return 'We are experiencing major service issues.';
-      case 'maintenance':
-        return 'We are currently performing scheduled maintenance.';
-      default:
-        return 'System status is unknown.';
+    const { totalActiveIssues } = status;
+    
+    if (totalActiveIssues === 0) {
+      return 'No active incidents detected in GearConnect.';
+    } else if (totalActiveIssues === 1) {
+      return '1 active incident affecting GearConnect services.';
+    } else {
+      return `${totalActiveIssues} active incidents affecting GearConnect services.`;
     }
   };
 
-  const getTrendIcon = (trend: 'up' | 'down' | 'stable') => {
-    switch (trend) {
-      case 'up':
-        return <AlertTriangle className="h-4 w-4 text-red-500" />;
-      case 'down':
-        return <Activity className="h-4 w-4 text-green-500" />;
-      default:
-        return <Clock className="h-4 w-4 text-gray-500" />;
+  const getStatusIcon = (serviceStatus: string, issueCount: number) => {
+    if (serviceStatus === 'down') {
+      return <XCircle className="h-5 w-5 text-red-600" />;
+    } else if (serviceStatus === 'degraded') {
+      return <AlertTriangle className="h-5 w-5 text-yellow-600" />;
+    } else {
+      return <CheckCircle className="h-5 w-5 text-green-600" />;
     }
+  };
+
+  const getServiceDisplayName = (serviceName: string) => {
+    const names = {
+      mobile: 'Mobile App',
+      api: 'API Services', 
+      auth: 'Authentication',
+      storage: 'File Storage'
+    };
+    return names[serviceName as keyof typeof names] || serviceName;
   };
 
   return (
@@ -52,83 +57,52 @@ const StatusOverview: React.FC<StatusOverviewProps> = ({ status, metrics }) => {
         </p>
       </div>
 
-      {/* Performance Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
-          <div className="flex items-center justify-between">
+      {/* Active Issues Summary */}
+      {status.totalActiveIssues > 0 && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+          <div className="flex items-center space-x-3">
+            <AlertTriangle className="h-6 w-6 text-red-600" />
             <div>
-              <p className="text-sm font-medium text-gray-600">Uptime</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {formatUptime(metrics.uptime.percentage)}
+              <h3 className="text-lg font-medium text-red-900">
+                {status.totalActiveIssues} Active Issue{status.totalActiveIssues !== 1 ? 's' : ''}
+              </h3>
+              <p className="text-sm text-red-700">
+                Some GearConnect services are experiencing problems. Check the incidents below for details.
               </p>
             </div>
-            <div className="flex items-center">
-              {getTrendIcon('stable')}
-            </div>
           </div>
-          <p className="text-xs text-gray-500 mt-2">
-            Last 30 days
-          </p>
         </div>
-
-        <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Response Time</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {formatResponseTime(metrics.responseTime.average)}
-              </p>
-            </div>
-            <div className="flex items-center">
-              {getTrendIcon(metrics.responseTime.trend)}
-            </div>
-          </div>
-          <p className="text-xs text-gray-500 mt-2">
-            Average over 24h
-          </p>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600">Error Rate</p>
-              <p className="text-2xl font-bold text-gray-900">
-                {formatUptime(metrics.errorRate.percentage)}
-              </p>
-            </div>
-            <div className="flex items-center">
-              {getTrendIcon(metrics.errorRate.trend)}
-            </div>
-          </div>
-          <p className="text-xs text-gray-500 mt-2">
-            Last 24 hours
-          </p>
-        </div>
-      </div>
+      )}
 
       {/* Services Status */}
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
         <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">Services</h2>
+          <h2 className="text-xl font-semibold text-gray-900">Service Components</h2>
+          <p className="text-sm text-gray-600 mt-1">
+            Real-time status based on actual incidents from Sentry
+          </p>
         </div>
         <div className="divide-y divide-gray-200">
           {Object.entries(status.services).map(([serviceName, service]) => (
             <div key={serviceName} className="px-6 py-4 flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <div className="flex-shrink-0">
-                  <StatusIndicator 
-                    status={service.status} 
-                    size="sm" 
-                    showText={false} 
-                  />
+                  {getStatusIcon(service.status, service.issueCount)}
                 </div>
                 <div>
-                  <h3 className="text-sm font-medium text-gray-900 capitalize">
-                    {serviceName}
+                  <h3 className="text-sm font-medium text-gray-900">
+                    {getServiceDisplayName(serviceName)}
                   </h3>
                   <p className="text-xs text-gray-500">
-                    {service.responseTime && (
-                      <>Response time: {formatResponseTime(service.responseTime)}</>
+                    {service.issueCount > 0 ? (
+                      <>
+                        {service.issueCount} active issue{service.issueCount !== 1 ? 's' : ''}
+                        {service.lastIssue && (
+                          <> • Last: {formatRelativeTime(service.lastIssue)}</>
+                        )}
+                      </>
+                    ) : (
+                      'No active issues'
                     )}
                   </p>
                 </div>
@@ -139,9 +113,6 @@ const StatusOverview: React.FC<StatusOverviewProps> = ({ status, metrics }) => {
                   size="sm" 
                   showIcon={false} 
                 />
-                <span className="text-xs text-gray-500">
-                  {formatRelativeTime(service.lastChecked)}
-                </span>
               </div>
             </div>
           ))}

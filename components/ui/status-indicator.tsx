@@ -1,6 +1,6 @@
 import React from 'react';
-import { CheckCircle, AlertTriangle, XCircle, Clock, Wrench } from 'lucide-react';
-import { StatusType, STATUS_COLORS } from '@/lib/types';
+import { CheckCircle, AlertTriangle, XCircle, Clock } from 'lucide-react';
+import { StatusType, statusConfig } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
 interface StatusIndicatorProps {
@@ -18,7 +18,7 @@ const StatusIndicator: React.FC<StatusIndicatorProps> = ({
   showIcon = true,
   className,
 }) => {
-  const colors = STATUS_COLORS[status];
+  const colors = statusConfig[status];
   
   const iconSizes = {
     sm: 'h-4 w-4',
@@ -42,8 +42,6 @@ const StatusIndicator: React.FC<StatusIndicatorProps> = ({
         return <AlertTriangle className={cn(iconClass, 'text-yellow-600')} />;
       case 'down':
         return <XCircle className={cn(iconClass, 'text-red-600')} />;
-      case 'maintenance':
-        return <Wrench className={cn(iconClass, 'text-blue-600')} />;
       default:
         return <Clock className={cn(iconClass, 'text-gray-600')} />;
     }
@@ -57,8 +55,6 @@ const StatusIndicator: React.FC<StatusIndicatorProps> = ({
         return 'Degraded Performance';
       case 'down':
         return 'Major Outage';
-      case 'maintenance':
-        return 'Under Maintenance';
       default:
         return 'Unknown';
     }

@@ -1,18 +1,25 @@
 // Types pour le site de statut GearConnect
 
 export interface ServiceStatus {
-  status: 'operational' | 'degraded' | 'down' | 'maintenance';
-  responseTime?: number;
+  status: 'operational' | 'degraded' | 'down';
   lastChecked: string;
-  uptime?: number;
+  issueCount: number;
+  lastIssue: string | null;
 }
 
 export interface SystemStatus {
-  overall: ServiceStatus;
+  overall: {
+    status: 'operational' | 'degraded' | 'down';
+    lastChecked: string;
+  };
   services: {
-    [key: string]: ServiceStatus;
+    mobile: ServiceStatus;
+    api: ServiceStatus;
+    auth: ServiceStatus;
+    storage: ServiceStatus;
   };
   lastUpdated: string;
+  totalActiveIssues: number;
 }
 
 export interface StatusMetrics {
@@ -41,6 +48,13 @@ export interface Incident {
   createdAt: string;
   resolvedAt?: string;
   updates: IncidentUpdate[];
+  
+  // Informations supplémentaires pour debugging
+  count?: number;
+  userCount?: number;
+  permalink?: string;
+  shortId?: string;
+  platform?: string;
 }
 
 export interface IncidentUpdate {
@@ -68,6 +82,7 @@ export interface StatusPageData {
     uptime: UptimeEntry[];
     responseTime: ResponseTimeEntry[];
   };
+  detailedErrors: DetailedError[];
   lastUpdated: string;
 }
 
@@ -88,13 +103,27 @@ export interface NotificationPreferences {
 }
 
 // Types pour l'intégration Sentry
+export interface DetailedError {
+  id: string;
+  title: string;
+  level: 'error' | 'warning' | 'info' | 'fatal';
+  timestamp: string;
+  user?: any;
+  device?: any;
+  os?: any;
+  app?: any;
+  stackTrace?: any;
+  breadcrumbs?: any[];
+  tags?: any[];
+}
+
 export interface SentryEvent {
   id: string;
   title: string;
-  level: 'error' | 'warning' | 'info';
+  level: string;
   timestamp: string;
-  tags: Record<string, string>;
-  contexts: Record<string, any>;
+  tags: any[];
+  contexts: any;
 }
 
 export interface SentryMetrics {
@@ -125,8 +154,8 @@ export interface ExternalStatusAPI {
   transform?: (data: any) => ServiceStatus;
 }
 
-// Status colors mapping
-export const STATUS_COLORS = {
+// Configuration des couleurs pour les statuts
+export const statusConfig = {
   operational: {
     bg: 'bg-green-100',
     text: 'text-green-800',
@@ -145,16 +174,9 @@ export const STATUS_COLORS = {
     border: 'border-red-200',
     dot: 'bg-red-400',
   },
-  maintenance: {
-    bg: 'bg-blue-100',
-    text: 'text-blue-800',
-    border: 'border-blue-200',
-    dot: 'bg-blue-400',
-  },
 } as const;
 
-// Utility types
-export type StatusType = keyof typeof STATUS_COLORS;
+export type StatusType = keyof typeof statusConfig;
 export type TrendType = 'up' | 'down' | 'stable';
 export type IncidentStatusType = 'investigating' | 'identified' | 'monitoring' | 'resolved';
 export type SeverityType = 'minor' | 'major' | 'critical'; 
