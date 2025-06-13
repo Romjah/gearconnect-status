@@ -1,43 +1,4 @@
-// Types pour le site de statut GearConnect
-
-export interface ServiceStatus {
-  status: 'operational' | 'degraded' | 'down';
-  lastChecked: string;
-  issueCount: number;
-  lastIssue: string | null;
-}
-
-export interface SystemStatus {
-  overall: {
-    status: 'operational' | 'degraded' | 'down';
-    lastChecked: string;
-  };
-  services: {
-    mobile: ServiceStatus;
-    api: ServiceStatus;
-    auth: ServiceStatus;
-    storage: ServiceStatus;
-  };
-  lastUpdated: string;
-  totalActiveIssues: number;
-}
-
-export interface StatusMetrics {
-  uptime: {
-    percentage: number;
-    lastUpdated: string;
-  };
-  responseTime: {
-    average: number;
-    trend: 'up' | 'down' | 'stable';
-    lastUpdated: string;
-  };
-  errorRate: {
-    percentage: number;
-    trend: 'up' | 'down' | 'stable';
-    lastUpdated: string;
-  };
-}
+// Types pour le site de statut GearConnect - Version simplifiée
 
 export interface Incident {
   id: string;
@@ -64,45 +25,28 @@ export interface IncidentUpdate {
   message: string;
 }
 
-export interface UptimeEntry {
-  date: string;
-  uptime: number;
+export interface ServiceStatus {
+  status: 'operational' | 'degraded' | 'down';
+  lastChecked: string;
+  issueCount: number;
+  lastIssue: string | null;
 }
 
-export interface ResponseTimeEntry {
-  timestamp: string;
-  responseTime: number;
-}
-
-export interface StatusPageData {
-  status: SystemStatus;
-  metrics: StatusMetrics;
-  incidents: Incident[];
-  history: {
-    uptime: UptimeEntry[];
-    responseTime: ResponseTimeEntry[];
+export interface SystemStatus {
+  overall: {
+    status: 'operational' | 'degraded' | 'down';
+    lastChecked: string;
   };
-  detailedErrors: DetailedError[];
+  services: {
+    mobile: ServiceStatus;
+    api: ServiceStatus;
+    auth: ServiceStatus;
+    storage: ServiceStatus;
+  };
   lastUpdated: string;
+  totalActiveIssues: number;
 }
 
-export interface Subscription {
-  id: string;
-  email: string;
-  phone?: string;
-  types: ('incident' | 'maintenance' | 'resolution')[];
-  verified: boolean;
-  createdAt: string;
-}
-
-export interface NotificationPreferences {
-  email: boolean;
-  sms: boolean;
-  webhook: boolean;
-  webhookUrl?: string;
-}
-
-// Types pour l'intégration Sentry
 export interface DetailedError {
   id: string;
   title: string;
@@ -126,32 +70,12 @@ export interface SentryEvent {
   contexts: any;
 }
 
-export interface SentryMetrics {
-  errorCount: number;
-  performanceScore: number;
-  userSatisfaction: number;
-  apdex: number;
-}
-
-// Types pour les configurations
-export interface StatusPageConfig {
-  siteName: string;
-  siteUrl: string;
-  contactEmail: string;
-  refreshInterval: number;
-  features: {
-    emailNotifications: boolean;
-    slackIntegration: boolean;
-    discordIntegration: boolean;
-  };
-}
-
-// Types pour les APIs externes
-export interface ExternalStatusAPI {
-  name: string;
-  url: string;
-  headers?: Record<string, string>;
-  transform?: (data: any) => ServiceStatus;
+// Interface principale pour la page de statut (nouvelle version simplifiée)
+export interface StatusPageData {
+  status: SystemStatus;
+  incidents: Incident[];
+  detailedErrors: DetailedError[];
+  lastUpdated: string;
 }
 
 // Configuration des couleurs pour les statuts
@@ -176,7 +100,4 @@ export const statusConfig = {
   },
 } as const;
 
-export type StatusType = keyof typeof statusConfig;
-export type TrendType = 'up' | 'down' | 'stable';
-export type IncidentStatusType = 'investigating' | 'identified' | 'monitoring' | 'resolved';
-export type SeverityType = 'minor' | 'major' | 'critical'; 
+export type StatusType = keyof typeof statusConfig; 
